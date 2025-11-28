@@ -39,10 +39,10 @@ const StartScreen = ({ onStart }) => {
             }}
         >
             <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem', textShadow: '0 0 10px rgba(255,255,255,0.5)' }}>
-                3D Particle System
+                3D 粒子系统
             </h1>
             <p style={{ marginBottom: '2rem', opacity: 0.8 }}>
-                Interactive Hand Tracking Experience
+                交互式手势追踪体验
             </p>
             <button
                 onClick={handleStart}
@@ -61,10 +61,10 @@ const StartScreen = ({ onStart }) => {
                 onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
                 onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
             >
-                START EXPERIENCE
+                开始体验
             </button>
             <p style={{ marginTop: '2rem', fontSize: '0.8rem', opacity: 0.5 }}>
-                Requires Camera Access
+                需要摄像头权限
             </p>
         </div>
     );

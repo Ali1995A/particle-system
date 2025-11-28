@@ -8,7 +8,7 @@ import { playScatter, playGather } from './utils/audio';
 function App() {
   const [hasStarted, setHasStarted] = useState(false);
   const [handState, setHandState] = useState({ isOpen: true, position: [0, 0, 0] });
-  const [selectedGreeting, setSelectedGreeting] = useState('新婚快乐');
+  const [selectedGreeting, setSelectedGreeting] = useState('生日快乐');
   const [sequenceIndex, setSequenceIndex] = useState(0); // 0: '3', 1: '2', 2: '1', 3: Greeting
   const [activeShape, setActiveShape] = useState('3');
   const [particleColor, setParticleColor] = useState('#FF0000'); // Default Red

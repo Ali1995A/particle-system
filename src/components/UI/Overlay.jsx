@@ -4,9 +4,10 @@ const Overlay = ({ selectedGreeting, setSelectedGreeting, particleColor, setPart
     const [isVisible, setIsVisible] = useState(false);
 
     const greetings = [
-        { id: '新婚快乐', label: '新婚快乐' },
-        { id: '新年快乐', label: '新年快乐' },
         { id: '生日快乐', label: '生日快乐' },
+        { id: '新年快乐', label: '新年快乐' },
+        { id: '圣诞快乐', label: '圣诞快乐' },
+        { id: '新婚快乐', label: '新婚快乐' },
     ];
 
     return (
@@ -58,7 +59,7 @@ const Overlay = ({ selectedGreeting, setSelectedGreeting, particleColor, setPart
                 onClick={(e) => e.stopPropagation()} // Prevent closing when clicking panel
             >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 'bold' }}>Settings</span>
+                    <span style={{ fontWeight: 'bold' }}>设置</span>
                     <button
                         onClick={() => setIsVisible(false)}
                         style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer' }}
@@ -68,7 +69,7 @@ const Overlay = ({ selectedGreeting, setSelectedGreeting, particleColor, setPart
                 </div>
 
                 <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Color</label>
+                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>粒子颜色</label>
                     <input
                         type="color"
                         value={particleColor}
@@ -78,7 +79,7 @@ const Overlay = ({ selectedGreeting, setSelectedGreeting, particleColor, setPart
                 </div>
 
                 <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>Greeting Text</label>
+                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9em' }}>祝福语</label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                         {greetings.map(item => (
                             <button

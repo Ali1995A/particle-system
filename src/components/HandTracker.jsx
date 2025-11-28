@@ -34,45 +34,59 @@ const HandTracker = ({ onHandUpdate }) => {
     const startWebcam = async () => {
         if (!videoRef.current) return;
 
-        // Detect iOS/iPad devices
+        // Detect mobile devices (iOS and Android)
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isAndroid = /Android/.test(navigator.userAgent);
+        const isMobile = isIOS || isAndroid;
 
-        console.log('Device detection:', { isIOS, userAgent: navigator.userAgent });
+        // Detect browser
+        const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+        const isSafari = /Safari/.test(navigator.userAgent) && !isChrome;
+
+        console.log('Device detection:', {
+            isIOS,
+            isAndroid,
+            isMobile,
+            browser: isSafari ? 'Safari' : isChrome ? 'Chrome' : 'Other',
+            userAgent: navigator.userAgent
+        });
 
         try {
             // Try multiple constraint strategies
             const constraints = [];
 
-            // For iOS devices, prioritize facingMode over deviceId
-            if (isIOS) {
-                console.log('iOS device detected, using facingMode-first strategy');
+            // Strategy 1: Optimal mobile constraints with flexible resolution ranges
+            // Works well on both iOS Safari and Android Chrome
+            if (isMobile) {
+                console.log('Mobile device detected, using optimized mobile strategy');
 
-                // Strategy 1: Use exact facingMode for iOS (most reliable)
-                constraints.push({
-                    video: {
-                        facingMode: { exact: 'user' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                });
-
-                // Strategy 2: Use ideal facingMode
                 constraints.push({
                     video: {
                         facingMode: { ideal: 'user' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                });
-
-                // Strategy 2.5: iOS Fallback - Simple facingMode without resolution
-                constraints.push({
-                    video: {
-                        facingMode: 'user'
+                        width: { min: 640, ideal: 1280, max: 1920 },
+                        height: { min: 480, ideal: 720, max: 1080 },
+                        frameRate: { ideal: 30, max: 60 }
                     }
                 });
             }
+
+            // Strategy 2: Simple facingMode with ideal resolution (universal)
+            constraints.push({
+                video: {
+                    facingMode: 'user',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                }
+            });
+
+            // Strategy 3: Simple facingMode without resolution (maximum compatibility)
+            constraints.push({
+                video: {
+                    facingMode: 'user'
+                }
+            });
 
             // Try to enumerate devices to find front camera
             let frontCameraDeviceId = null;
@@ -112,45 +126,19 @@ const HandTracker = ({ onHandUpdate }) => {
                 console.warn('Could not enumerate devices:', enumError);
             }
 
-            // Strategy 3: Use specific device ID if found (only if not iOS or as fallback)
-            if (frontCameraDeviceId && hasDeviceLabels && !isIOS) {
+            // Strategy 4: Use specific device ID if found (for desktop or as additional fallback)
+            if (frontCameraDeviceId && hasDeviceLabels && !isMobile) {
                 constraints.push({
                     video: {
                         deviceId: { exact: frontCameraDeviceId },
                         width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 30 }
                     }
                 });
             }
 
-            // Strategy 4: Use ideal facingMode (if not already added for iOS)
-            if (!isIOS) {
-                constraints.push({
-                    video: {
-                        facingMode: { ideal: 'user' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                });
-            }
-
-            // Strategy 5: Simple facingMode (universal fallback)
-            constraints.push({
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            });
-
-            // Strategy 5.5: Simple facingMode NO resolution (universal fallback)
-            constraints.push({
-                video: {
-                    facingMode: 'user'
-                }
-            });
-
-            // Strategy 6: Minimal constraints (last resort)
+            // Strategy 5: Minimal constraints (last resort)
             constraints.push({
                 video: true
             });
@@ -174,6 +162,7 @@ const HandTracker = ({ onHandUpdate }) => {
                             facingMode: settings.facingMode,
                             width: settings.width,
                             height: settings.height,
+                            frameRate: settings.frameRate,
                             deviceId: settings.deviceId
                         });
 
@@ -206,6 +195,7 @@ const HandTracker = ({ onHandUpdate }) => {
                     facingMode: settings.facingMode,
                     width: settings.width,
                     height: settings.height,
+                    frameRate: settings.frameRate,
                     deviceId: settings.deviceId,
                     label: videoTrack.label
                 });

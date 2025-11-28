@@ -34,18 +34,132 @@ const HandTracker = ({ onHandUpdate }) => {
     const startWebcam = async () => {
         if (!videoRef.current) return;
 
+        // Detect iOS/iPad devices
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        console.log('Device detection:', { isIOS, userAgent: navigator.userAgent });
+
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
+            // First, try to enumerate devices to find front camera
+            let frontCameraDeviceId = null;
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                console.log('Available video devices:', videoDevices);
+                
+                // Look for front camera (usually contains 'front' or comes first on mobile)
+                const frontCamera = videoDevices.find(device => 
+                    device.label.toLowerCase().includes('front') || 
+                    device.label.toLowerCase().includes('user')
+                );
+                
+                if (frontCamera) {
+                    frontCameraDeviceId = frontCamera.deviceId;
+                    console.log('Found front camera:', frontCamera.label);
+                }
+            } catch (enumError) {
+                console.warn('Could not enumerate devices:', enumError);
+            }
+
+            // Try multiple constraint strategies
+            const constraints = [];
+            
+            // Strategy 1: Use specific device ID if found
+            if (frontCameraDeviceId) {
+                constraints.push({
+                    video: {
+                        deviceId: { exact: frontCameraDeviceId },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+            }
+
+            // Strategy 2: Use exact facingMode for iOS
+            if (isIOS) {
+                constraints.push({
+                    video: {
+                        facingMode: { exact: 'user' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+            }
+
+            // Strategy 3: Use ideal facingMode
+            constraints.push({
                 video: {
-                    facingMode: 'user', // Force front camera
+                    facingMode: { ideal: 'user' },
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
                 }
             });
+
+            // Strategy 4: Simple facingMode (fallback)
+            constraints.push({
+                video: {
+                    facingMode: 'user',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            });
+
+            // Try each constraint strategy
+            let stream = null;
+            let lastError = null;
+
+            for (let i = 0; i < constraints.length; i++) {
+                try {
+                    console.log(`Trying camera constraint strategy ${i + 1}:`, constraints[i]);
+                    stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+                    console.log('Successfully obtained camera stream with strategy', i + 1);
+                    break;
+                } catch (err) {
+                    console.warn(`Strategy ${i + 1} failed:`, err.name, err.message);
+                    lastError = err;
+                }
+            }
+
+            if (!stream) {
+                throw lastError || new Error('All camera strategies failed');
+            }
+
+            // Log the actual camera being used
+            const videoTrack = stream.getVideoTracks()[0];
+            if (videoTrack) {
+                const settings = videoTrack.getSettings();
+                console.log('Camera settings:', {
+                    facingMode: settings.facingMode,
+                    width: settings.width,
+                    height: settings.height,
+                    deviceId: settings.deviceId
+                });
+            }
+
             videoRef.current.srcObject = stream;
             videoRef.current.addEventListener('loadeddata', predictWebcam);
         } catch (err) {
-            console.error('Error accessing webcam:', err);
+            console.error('Error accessing webcam:', {
+                name: err.name,
+                message: err.message,
+                constraint: err.constraint
+            });
+
+            // Provide user-friendly error messages
+            let errorMessage = '无法访问摄像头。';
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                errorMessage += '请允许浏览器访问摄像头权限。';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                errorMessage += '未找到摄像头设备。';
+            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                errorMessage += '摄像头正被其他应用使用。';
+            } else if (err.name === 'OverconstrainedError') {
+                errorMessage += '摄像头不支持请求的配置。';
+            }
+            
+            console.error(errorMessage);
+            alert(errorMessage + '\n\n技术详情: ' + err.message);
         }
     };
 

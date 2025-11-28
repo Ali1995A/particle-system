@@ -35,38 +35,79 @@ const HandTracker = ({ onHandUpdate }) => {
         if (!videoRef.current) return;
 
         // Detect iOS/iPad devices
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
         console.log('Device detection:', { isIOS, userAgent: navigator.userAgent });
 
         try {
-            // First, try to enumerate devices to find front camera
+            // Try multiple constraint strategies
+            const constraints = [];
+
+            // For iOS devices, prioritize facingMode over deviceId
+            // This is more reliable on iOS/iPad
+            if (isIOS) {
+                console.log('iOS device detected, using facingMode-first strategy');
+
+                // Strategy 1: Use exact facingMode for iOS (most reliable)
+                constraints.push({
+                    video: {
+                        facingMode: { exact: 'user' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+
+                // Strategy 2: Use ideal facingMode
+                constraints.push({
+                    video: {
+                        facingMode: { ideal: 'user' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+            }
+
+            // Try to enumerate devices to find front camera
             let frontCameraDeviceId = null;
+            let hasDeviceLabels = false;
+
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                console.log('Available video devices:', videoDevices);
-                
-                // Look for front camera (usually contains 'front' or comes first on mobile)
-                const frontCamera = videoDevices.find(device => 
-                    device.label.toLowerCase().includes('front') || 
-                    device.label.toLowerCase().includes('user')
-                );
-                
-                if (frontCamera) {
-                    frontCameraDeviceId = frontCamera.deviceId;
-                    console.log('Found front camera:', frontCamera.label);
+                console.log('Available video devices:', videoDevices.map(d => ({
+                    deviceId: d.deviceId,
+                    label: d.label || '(unlabeled)',
+                    kind: d.kind
+                })));
+
+                // Check if we have device labels (requires permission)
+                hasDeviceLabels = videoDevices.some(device => device.label !== '');
+                console.log('Device labels available:', hasDeviceLabels);
+
+                if (hasDeviceLabels) {
+                    // Look for front camera by label
+                    const frontCamera = videoDevices.find(device =>
+                        device.label.toLowerCase().includes('front') ||
+                        device.label.toLowerCase().includes('user') ||
+                        device.label.toLowerCase().includes('facetime')
+                    );
+
+                    if (frontCamera) {
+                        frontCameraDeviceId = frontCamera.deviceId;
+                        console.log('Found front camera by label:', frontCamera.label);
+                    } else if (videoDevices.length > 0) {
+                        // On mobile, first camera is usually front camera
+                        frontCameraDeviceId = videoDevices[0].deviceId;
+                        console.log('Using first camera as fallback:', videoDevices[0].label);
+                    }
                 }
             } catch (enumError) {
                 console.warn('Could not enumerate devices:', enumError);
             }
 
-            // Try multiple constraint strategies
-            const constraints = [];
-            
-            // Strategy 1: Use specific device ID if found
-            if (frontCameraDeviceId) {
+            // Strategy 3: Use specific device ID if found (only if not iOS or as fallback)
+            if (frontCameraDeviceId && hasDeviceLabels && !isIOS) {
                 constraints.push({
                     video: {
                         deviceId: { exact: frontCameraDeviceId },
@@ -76,27 +117,18 @@ const HandTracker = ({ onHandUpdate }) => {
                 });
             }
 
-            // Strategy 2: Use exact facingMode for iOS
-            if (isIOS) {
+            // Strategy 4: Use ideal facingMode (if not already added for iOS)
+            if (!isIOS) {
                 constraints.push({
                     video: {
-                        facingMode: { exact: 'user' },
+                        facingMode: { ideal: 'user' },
                         width: { ideal: 1280 },
                         height: { ideal: 720 }
                     }
                 });
             }
 
-            // Strategy 3: Use ideal facingMode
-            constraints.push({
-                video: {
-                    facingMode: { ideal: 'user' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            });
-
-            // Strategy 4: Simple facingMode (fallback)
+            // Strategy 5: Simple facingMode (universal fallback)
             constraints.push({
                 video: {
                     facingMode: 'user',
@@ -105,15 +137,43 @@ const HandTracker = ({ onHandUpdate }) => {
                 }
             });
 
+            // Strategy 6: Minimal constraints (last resort)
+            constraints.push({
+                video: true
+            });
+
+            console.log(`Will try ${constraints.length} camera strategies`);
+
             // Try each constraint strategy
             let stream = null;
             let lastError = null;
 
             for (let i = 0; i < constraints.length; i++) {
                 try {
-                    console.log(`Trying camera constraint strategy ${i + 1}:`, constraints[i]);
-                    stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
-                    console.log('Successfully obtained camera stream with strategy', i + 1);
+                    console.log(`Trying camera constraint strategy ${i + 1}/${constraints.length}:`, constraints[i]);
+                    const testStream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+
+                    // Verify we got the front camera
+                    const videoTrack = testStream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        const settings = videoTrack.getSettings();
+                        console.log(`Strategy ${i + 1} camera settings:`, {
+                            facingMode: settings.facingMode,
+                            width: settings.width,
+                            height: settings.height,
+                            deviceId: settings.deviceId
+                        });
+
+                        // Check if this is the back camera (we want front camera)
+                        if (settings.facingMode === 'environment') {
+                            console.warn(`Strategy ${i + 1} returned back camera, trying next strategy...`);
+                            testStream.getTracks().forEach(track => track.stop());
+                            continue;
+                        }
+                    }
+
+                    stream = testStream;
+                    console.log(`✓ Successfully obtained front camera with strategy ${i + 1}`);
                     break;
                 } catch (err) {
                     console.warn(`Strategy ${i + 1} failed:`, err.name, err.message);
@@ -125,15 +185,16 @@ const HandTracker = ({ onHandUpdate }) => {
                 throw lastError || new Error('All camera strategies failed');
             }
 
-            // Log the actual camera being used
+            // Log final camera settings
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
                 const settings = videoTrack.getSettings();
-                console.log('Camera settings:', {
+                console.log('✓ Final camera settings:', {
                     facingMode: settings.facingMode,
                     width: settings.width,
                     height: settings.height,
-                    deviceId: settings.deviceId
+                    deviceId: settings.deviceId,
+                    label: videoTrack.label
                 });
             }
 
@@ -157,7 +218,7 @@ const HandTracker = ({ onHandUpdate }) => {
             } else if (err.name === 'OverconstrainedError') {
                 errorMessage += '摄像头不支持请求的配置。';
             }
-            
+
             console.error(errorMessage);
             alert(errorMessage + '\n\n技术详情: ' + err.message);
         }

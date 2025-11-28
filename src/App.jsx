@@ -56,11 +56,11 @@ function App() {
 
   return (
     <>
-      <HandTracker onHandUpdate={setHandState} />
       {!hasStarted && <StartScreen onStart={() => setHasStarted(true)} />}
 
       {hasStarted && (
         <>
+          <HandTracker onHandUpdate={setHandState} />
           <Scene
             handState={handState}
             activeShape={activeShape}

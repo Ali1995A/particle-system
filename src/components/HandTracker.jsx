@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
 const HandTracker = ({ onHandUpdate }) => {
     const videoRef = useRef(null);
     const handLandmarkerRef = useRef(null);
     const requestRef = useRef(null);
+    const [showPlayButton, setShowPlayButton] = useState(false);
 
     useEffect(() => {
         const initHandLandmarker = async () => {
@@ -175,7 +176,7 @@ const HandTracker = ({ onHandUpdate }) => {
                     }
 
                     stream = testStream;
-                    console.log(`✓ Successfully obtained front camera with strategy ${i + 1}`);
+                    console.log(`鉁?Successfully obtained front camera with strategy ${i + 1}`);
                     break;
                 } catch (err) {
                     console.warn(`Strategy ${i + 1} failed:`, err.name, err.message);
@@ -191,7 +192,7 @@ const HandTracker = ({ onHandUpdate }) => {
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
                 const settings = videoTrack.getSettings();
-                console.log('✓ Final camera settings:', {
+                console.log('鉁?Final camera settings:', {
                     facingMode: settings.facingMode,
                     width: settings.width,
                     height: settings.height,
@@ -203,16 +204,22 @@ const HandTracker = ({ onHandUpdate }) => {
 
             videoRef.current.srcObject = stream;
 
-            // Explicitly play video for iOS
-            try {
-                await videoRef.current.play();
-                console.log('Video playback started');
-            } catch (playErr) {
-                console.error('Video playback failed:', playErr);
-                // Try playing on user interaction if needed (though we can't easily do that here without UI)
-            }
+            // Critical for iOS: Wait for video metadata to load before playing
+            videoRef.current.onloadedmetadata = async () => {
+                try {
+                    console.log('Video metadata loaded, attempting to play...');
+                    await videoRef.current.play();
+                    console.log('✓ Video playback started successfully');
+                    setShowPlayButton(false);
 
-            videoRef.current.addEventListener('loadeddata', predictWebcam);
+                    // Start hand tracking after video is playing
+                    predictWebcam();
+                } catch (playErr) {
+                    console.error('Video playback failed:', playErr);
+                    setShowPlayButton(true);
+                    // alert('无法播放摄像头画面。\n\niOS 用户请确保：\n1. 使用 Safari 浏览器\n2. 已授予摄像头权限\n3. 不在低电量模式\n\n错误: ' + playErr.message);
+                }
+            };
         } catch (err) {
             console.error('Error accessing webcam:', {
                 name: err.name,
@@ -280,22 +287,64 @@ const HandTracker = ({ onHandUpdate }) => {
         requestRef.current = requestAnimationFrame(predictWebcam);
     };
 
+
+
+    const handleManualPlay = async () => {
+        if (videoRef.current) {
+            try {
+                await videoRef.current.play();
+                setShowPlayButton(false);
+                predictWebcam();
+            } catch (e) {
+                console.error("Manual play failed", e);
+                alert("无法启动视频: " + e.message);
+            }
+        }
+    };
+
     return (
-        <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '1px',
-                height: '1px',
-                opacity: 0,
-                pointerEvents: 'none',
-            }}
-        />
+        <>
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                webkit-playsinline="true"
+                muted
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                    zIndex: -1
+                }}
+            />
+            {showPlayButton && (
+                <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 1000
+                }}>
+                    <button
+                        onClick={handleManualPlay}
+                        style={{
+                            padding: '15px 30px',
+                            fontSize: '1.2rem',
+                            backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '10px'
+                        }}
+                    >
+                        点击启动摄像头
+                    </button>
+                </div>
+            )}
+        </>
     );
 };
 

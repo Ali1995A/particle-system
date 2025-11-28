@@ -45,7 +45,6 @@ const HandTracker = ({ onHandUpdate }) => {
             const constraints = [];
 
             // For iOS devices, prioritize facingMode over deviceId
-            // This is more reliable on iOS/iPad
             if (isIOS) {
                 console.log('iOS device detected, using facingMode-first strategy');
 
@@ -64,6 +63,13 @@ const HandTracker = ({ onHandUpdate }) => {
                         facingMode: { ideal: 'user' },
                         width: { ideal: 1280 },
                         height: { ideal: 720 }
+                    }
+                });
+
+                // Strategy 2.5: iOS Fallback - Simple facingMode without resolution
+                constraints.push({
+                    video: {
+                        facingMode: 'user'
                     }
                 });
             }
@@ -137,6 +143,13 @@ const HandTracker = ({ onHandUpdate }) => {
                 }
             });
 
+            // Strategy 5.5: Simple facingMode NO resolution (universal fallback)
+            constraints.push({
+                video: {
+                    facingMode: 'user'
+                }
+            });
+
             // Strategy 6: Minimal constraints (last resort)
             constraints.push({
                 video: true
@@ -199,6 +212,16 @@ const HandTracker = ({ onHandUpdate }) => {
             }
 
             videoRef.current.srcObject = stream;
+
+            // Explicitly play video for iOS
+            try {
+                await videoRef.current.play();
+                console.log('Video playback started');
+            } catch (playErr) {
+                console.error('Video playback failed:', playErr);
+                // Try playing on user interaction if needed (though we can't easily do that here without UI)
+            }
+
             videoRef.current.addEventListener('loadeddata', predictWebcam);
         } catch (err) {
             console.error('Error accessing webcam:', {

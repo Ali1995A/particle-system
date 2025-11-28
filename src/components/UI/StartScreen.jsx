@@ -1,6 +1,25 @@
 import React from 'react';
 
 const StartScreen = ({ onStart }) => {
+    const handleStart = async () => {
+        // Request fullscreen
+        try {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                await elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) { // Safari
+                await elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) { // IE11
+                await elem.msRequestFullscreen();
+            }
+        } catch (err) {
+            console.log('Fullscreen request failed:', err);
+            // Continue anyway if fullscreen fails
+        }
+
+        onStart();
+    };
+
     return (
         <div
             style={{
@@ -26,7 +45,7 @@ const StartScreen = ({ onStart }) => {
                 Interactive Hand Tracking Experience
             </p>
             <button
-                onClick={onStart}
+                onClick={handleStart}
                 style={{
                     padding: '15px 40px',
                     fontSize: '1.2rem',

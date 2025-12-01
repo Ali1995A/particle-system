@@ -1,0 +1,16 @@
+﻿            videoRef.current.srcObject = stream;
+
+            // Critical for iOS: Wait for video metadata to load before playing
+            videoRef.current.onloadedmetadata = async () => {
+                try {
+                    console.log('Video metadata loaded, attempting to play...');
+                    await videoRef.current.play();
+                    console.log('✓ Video playback started successfully');
+                    
+                    // Start hand tracking after video is playing
+                    predictWebcam();
+                } catch (playErr) {
+                    console.error('Video playback failed:', playErr);
+                    alert('无法播放摄像头画面。\n\niOS 用户请确保：\n1. 使用 Safari 浏览器\n2. 已授予摄像头权限\n3. 不在低电量模式\n\n错误: ' + playErr.message);
+                }
+            };

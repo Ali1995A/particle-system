@@ -13,6 +13,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
     const initPromiseRef = useRef(null);
 
     const [showPlayButton, setShowPlayButton] = useState(false);
+    const [errorText, setErrorText] = useState('');
 
     const getUserMediaCompat = (constraints) => {
         if (navigator.mediaDevices?.getUserMedia) {
@@ -70,7 +71,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
             maybeStartPredicting();
         })().catch((err) => {
             console.error('Failed to init HandLandmarker:', err);
-            alert('手势模型初始化失败：' + (err?.message || String(err)));
+            setErrorText('手势模型初始化失败，请刷新后重试。');
         });
 
         return () => {
@@ -107,17 +108,18 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
         );
 
         if (!hasModernGetUserMedia && !hasLegacyGetUserMedia) {
-            alert('当前浏览器不支持摄像头访问（getUserMedia）。请使用 Safari 打开，或升级系统/浏览器版本。');
+            setErrorText('这个浏览器不支持摄像头。请换一个浏览器或升级系统/微信版本。');
             return;
         }
 
         // iOS/移动端：需要 HTTPS（localhost 例外）。
         if (!window.isSecureContext) {
-            alert('无法访问摄像头：当前页面不是安全上下文(HTTPS)。请使用 https:// 访问，或在本机用 localhost 进行测试。');
+            setErrorText('需要 HTTPS 才能使用摄像头。请用 https:// 打开这个页面。');
             return;
         }
 
         // Restart safety
+        setErrorText('');
         predictingRef.current = false;
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
         cleanupStream();
@@ -134,7 +136,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
         const isChrome = /Chrome/.test(ua) || /CriOS/.test(ua);
         const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
 
-        // iOS 常见“内置浏览器/WebView”基本无法弹出摄像头授权或直接不支持。
+        // iOS 内置浏览器/WebView（如微信内）对摄像头能力因版本而异：不提前阻止，失败时给“重试”入口。
         const isIOSInAppBrowser = isIOS && /MicroMessenger|Weibo|QQ\//i.test(ua);
 
         console.log('Device detection:', {
@@ -246,9 +248,9 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
                 constraint: err?.constraint,
             });
 
-            let errorMessage = '无法访问摄像头。';
+            let errorMessage = '无法打开摄像头。';
             if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
-                errorMessage += '请允许浏览器访问摄像头权限。';
+                errorMessage += '请点“允许”后再试一次。';
             } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
                 errorMessage += '未找到摄像头设备。';
             } else if (err?.name === 'NotReadableError' || err?.name === 'TrackStartError') {
@@ -258,11 +260,11 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
             }
 
             if (isIOSInAppBrowser) {
-                errorMessage += '\n\niOS 内置浏览器/小程序通常无法使用摄像头，请在 Safari 中打开。';
+                errorMessage += '\n\n如果没有出现“是否允许使用相机”的询问，请升级微信版本后再试。';
             }
 
             console.error(errorMessage);
-            alert(errorMessage + '\n\n技术详情: ' + (err?.message || String(err)));
+            setErrorText(errorMessage);
         }
     };
 
@@ -324,7 +326,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
                 maybeStartPredicting();
             } catch (e) {
                 console.error('Manual play failed', e);
-                alert('无法启动视频: ' + (e?.message || String(e)));
+                setErrorText('无法启动视频，请再试一次。');
             }
         }
     };
@@ -347,6 +349,48 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
                     zIndex: -1,
                 }}
             />
+            {!!errorText && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2000,
+                        color: 'white',
+                        textAlign: 'center',
+                        padding: 24,
+                        gap: 16,
+                    }}
+                >
+                    <div style={{ fontSize: 18, lineHeight: 1.4, whiteSpace: 'pre-wrap', maxWidth: 520 }}>
+                        {errorText}
+                    </div>
+                    <button
+                        onClick={() => {
+                            startedRef.current = true;
+                            void startWebcam();
+                        }}
+                        style={{
+                            padding: '14px 24px',
+                            fontSize: 18,
+                            backgroundColor: 'white',
+                            color: 'black',
+                            border: 'none',
+                            borderRadius: 12,
+                            fontWeight: 700,
+                        }}
+                    >
+                        再试一次
+                    </button>
+                </div>
+            )}
             {showPlayButton && (
                 <div
                     style={{

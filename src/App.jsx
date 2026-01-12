@@ -4,6 +4,7 @@ import Overlay from './components/UI/Overlay';
 import HandTracker from './components/HandTracker';
 import StartScreen from './components/UI/StartScreen';
 import { playScatter, playGather } from './utils/audio';
+import { getQualityPreset } from './utils/quality';
 
 function App() {
   const [hasStarted, setHasStarted] = useState(false);
@@ -15,6 +16,8 @@ function App() {
 
   const wasOpenRef = useRef(true);
   const handTrackerRef = useRef(null);
+  const quality = useRef(null);
+  if (!quality.current) quality.current = getQualityPreset();
 
   // Sequence mapping
   const getShapeFromIndex = (index) => {
@@ -57,7 +60,7 @@ function App() {
 
   return (
     <>
-      <HandTracker ref={handTrackerRef} onHandUpdate={setHandState} />
+      <HandTracker ref={handTrackerRef} onHandUpdate={setHandState} quality={quality.current} />
 
       {!hasStarted && (
         <StartScreen
@@ -74,6 +77,7 @@ function App() {
             handState={handState}
             activeShape={activeShape}
             particleColor={particleColor}
+            quality={quality.current}
           />
           <Overlay
             selectedGreeting={selectedGreeting}

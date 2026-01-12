@@ -1,12 +1,13 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
+const HandTracker = forwardRef(({ onHandUpdate, quality }, ref) => {
     const videoRef = useRef(null);
     const handLandmarkerRef = useRef(null);
     const requestRef = useRef(null);
     const streamRef = useRef(null);
     const isFrontCameraRef = useRef(true);
+    const lastDetectTsRef = useRef(0);
 
     const startedRef = useRef(false);
     const predictingRef = useRef(false);
@@ -179,14 +180,18 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
             // Important: do NOT await anything (like enumerateDevices) before getUserMedia.
             const constraints = [];
 
+            const videoWidth = quality?.video?.width ?? 1280;
+            const videoHeight = quality?.video?.height ?? 720;
+            const videoFrameRate = quality?.video?.frameRate ?? 30;
+
             if (isMobile) {
                 constraints.push({
                     audio: false,
                     video: {
                         facingMode: 'user',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        frameRate: { ideal: 30 },
+                        width: { ideal: videoWidth },
+                        height: { ideal: videoHeight },
+                        frameRate: { ideal: videoFrameRate },
                     },
                 });
             }
@@ -307,6 +312,12 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
         }
 
         const startTimeMs = performance.now();
+        const minIntervalMs = 1000 / (quality?.handFps ?? 24);
+        if (startTimeMs - lastDetectTsRef.current < minIntervalMs) {
+            requestRef.current = requestAnimationFrame(predictWebcam);
+            return;
+        }
+        lastDetectTsRef.current = startTimeMs;
         if (videoRef.current.currentTime !== videoRef.current.lastVideoTime) {
             const detections = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
 

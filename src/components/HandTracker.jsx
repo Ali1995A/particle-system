@@ -15,6 +15,52 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
     const [showPlayButton, setShowPlayButton] = useState(false);
     const [errorText, setErrorText] = useState('');
 
+    const ensureHandLandmarker = () => {
+        if (handLandmarkerRef.current) return Promise.resolve(handLandmarkerRef.current);
+        if (initPromiseRef.current) return initPromiseRef.current;
+
+        initPromiseRef.current = (async () => {
+            // Important: keep the wasm base version aligned with the installed JS package version.
+            const vision = await FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm'
+            );
+
+            const create = async (delegate) =>
+                HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath:
+                            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+                        delegate,
+                    },
+                    runningMode: 'VIDEO',
+                    numHands: 1,
+                });
+
+            // Older iOS devices (and iOS Chrome which is WebKit) may fail with GPU delegate; fallback to CPU.
+            try {
+                handLandmarkerRef.current = await create('GPU');
+            } catch (gpuErr) {
+                console.warn('HandLandmarker GPU init failed, falling back to CPU:', gpuErr);
+                handLandmarkerRef.current = await create('CPU');
+            }
+
+            return handLandmarkerRef.current;
+        })()
+            .then((lm) => {
+                maybeStartPredicting();
+                return lm;
+            })
+            .catch((err) => {
+                console.error('Failed to init HandLandmarker:', err);
+                // Allow retry.
+                initPromiseRef.current = null;
+                setErrorText('手势识别加载失败。\n\n点“再试一次”。');
+                throw err;
+            });
+
+        return initPromiseRef.current;
+    };
+
     const getUserMediaCompat = (constraints) => {
         if (navigator.mediaDevices?.getUserMedia) {
             return navigator.mediaDevices.getUserMedia(constraints);
@@ -54,25 +100,8 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
     };
 
     useEffect(() => {
-        initPromiseRef.current = (async () => {
-            const vision = await FilesetResolver.forVisionTasks(
-                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
-            );
-
-            handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                    delegate: 'GPU',
-                },
-                runningMode: 'VIDEO',
-                numHands: 1,
-            });
-
-            maybeStartPredicting();
-        })().catch((err) => {
-            console.error('Failed to init HandLandmarker:', err);
-            setErrorText('手势模型初始化失败，请刷新后重试。');
-        });
+        // Preload model in background; user can still start camera immediately.
+        void ensureHandLandmarker();
 
         return () => {
             predictingRef.current = false;
@@ -84,6 +113,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
     useImperativeHandle(ref, () => ({
         start: () => {
             startedRef.current = true;
+            void ensureHandLandmarker();
             // iOS Safari：需要“用户手势”链路里尽快触发 getUserMedia。
             // 这里不要 await 任何事情，避免打断 user activation。
             void startWebcam();
@@ -375,6 +405,7 @@ const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
                     <button
                         onClick={() => {
                             startedRef.current = true;
+                            void ensureHandLandmarker();
                             void startWebcam();
                         }}
                         style={{

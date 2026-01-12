@@ -1,23 +1,25 @@
 import React from 'react';
 
 const StartScreen = ({ onStart }) => {
-    const handleStart = async () => {
-        // Request fullscreen
+    const handleStart = () => {
+        // iOS Safari 需要保持“用户手势”链路来触发摄像头权限弹窗，
+        // 所以先同步开始（请求摄像头），全屏放到后面非阻塞执行。
+        onStart?.();
+
         try {
             const elem = document.documentElement;
-            if (elem.requestFullscreen) {
-                await elem.requestFullscreen();
-            } else if (elem.webkitRequestFullscreen) { // Safari
-                await elem.webkitRequestFullscreen();
-            } else if (elem.msRequestFullscreen) { // IE11
-                await elem.msRequestFullscreen();
+            const p =
+                elem.requestFullscreen?.() ||
+                elem.webkitRequestFullscreen?.() ||
+                elem.msRequestFullscreen?.();
+            if (p?.catch) {
+                p.catch((err) => {
+                    console.log('Fullscreen request failed:', err);
+                });
             }
         } catch (err) {
             console.log('Fullscreen request failed:', err);
-            // Continue anyway if fullscreen fails
         }
-
-        onStart();
     };
 
     return (

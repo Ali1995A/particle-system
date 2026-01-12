@@ -1,14 +1,59 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-const HandTracker = ({ onHandUpdate }) => {
+const HandTracker = forwardRef(({ onHandUpdate }, ref) => {
     const videoRef = useRef(null);
     const handLandmarkerRef = useRef(null);
     const requestRef = useRef(null);
+    const streamRef = useRef(null);
+    const isFrontCameraRef = useRef(true);
+
+    const startedRef = useRef(false);
+    const predictingRef = useRef(false);
+    const initPromiseRef = useRef(null);
+
     const [showPlayButton, setShowPlayButton] = useState(false);
 
+    const getUserMediaCompat = (constraints) => {
+        if (navigator.mediaDevices?.getUserMedia) {
+            return navigator.mediaDevices.getUserMedia(constraints);
+        }
+
+        const legacyGetUserMedia =
+            navigator.getUserMedia ||
+            navigator.webkitGetUserMedia ||
+            navigator.mozGetUserMedia ||
+            navigator.msGetUserMedia;
+
+        if (!legacyGetUserMedia) {
+            return Promise.reject(new Error('getUserMedia is not supported'));
+        }
+
+        return new Promise((resolve, reject) => {
+            legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+        });
+    };
+
+    const cleanupStream = () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+        }
+    };
+
+    const maybeStartPredicting = () => {
+        if (!startedRef.current) return;
+        if (predictingRef.current) return;
+        if (!handLandmarkerRef.current) return;
+        if (!videoRef.current) return;
+        if (!streamRef.current) return;
+        if (videoRef.current.readyState < 2) return; // HAVE_CURRENT_DATA
+        predictingRef.current = true;
+        predictWebcam();
+    };
+
     useEffect(() => {
-        const initHandLandmarker = async () => {
+        initPromiseRef.current = (async () => {
             const vision = await FilesetResolver.forVisionTasks(
                 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
             );
@@ -22,140 +67,119 @@ const HandTracker = ({ onHandUpdate }) => {
                 numHands: 1,
             });
 
-            startWebcam();
-        };
-
-        initHandLandmarker();
+            maybeStartPredicting();
+        })().catch((err) => {
+            console.error('Failed to init HandLandmarker:', err);
+            alert('手势模型初始化失败：' + (err?.message || String(err)));
+        });
 
         return () => {
+            predictingRef.current = false;
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            cleanupStream();
         };
     }, []);
+
+    useImperativeHandle(ref, () => ({
+        start: () => {
+            startedRef.current = true;
+            // iOS Safari：需要“用户手势”链路里尽快触发 getUserMedia。
+            // 这里不要 await 任何事情，避免打断 user activation。
+            void startWebcam();
+        },
+        stop: () => {
+            startedRef.current = false;
+            predictingRef.current = false;
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            cleanupStream();
+        },
+    }));
 
     const startWebcam = async () => {
         if (!videoRef.current) return;
 
+        const hasModernGetUserMedia = !!navigator.mediaDevices?.getUserMedia;
+        const hasLegacyGetUserMedia = !!(
+            navigator.getUserMedia ||
+            navigator.webkitGetUserMedia ||
+            navigator.mozGetUserMedia ||
+            navigator.msGetUserMedia
+        );
+
+        if (!hasModernGetUserMedia && !hasLegacyGetUserMedia) {
+            alert('当前浏览器不支持摄像头访问（getUserMedia）。请使用 Safari 打开，或升级系统/浏览器版本。');
+            return;
+        }
+
+        // iOS/移动端：需要 HTTPS（localhost 例外）。
+        if (!window.isSecureContext) {
+            alert('无法访问摄像头：当前页面不是安全上下文(HTTPS)。请使用 https:// 访问，或在本机用 localhost 进行测试。');
+            return;
+        }
+
+        // Restart safety
+        predictingRef.current = false;
+        if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        cleanupStream();
+
         // Detect mobile devices (iOS and Android)
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        const isIOS =
+            /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         const isAndroid = /Android/.test(navigator.userAgent);
         const isMobile = isIOS || isAndroid;
 
         // Detect browser
-        const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
-        const isSafari = /Safari/.test(navigator.userAgent) && !isChrome;
+        const ua = navigator.userAgent || '';
+        const isChrome = /Chrome/.test(ua) || /CriOS/.test(ua);
+        const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+
+        // iOS 常见“内置浏览器/WebView”基本无法弹出摄像头授权或直接不支持。
+        const isIOSInAppBrowser = isIOS && /MicroMessenger|Weibo|QQ\//i.test(ua);
 
         console.log('Device detection:', {
             isIOS,
             isAndroid,
             isMobile,
             browser: isSafari ? 'Safari' : isChrome ? 'Chrome' : 'Other',
-            userAgent: navigator.userAgent
+            userAgent: navigator.userAgent,
         });
 
         try {
-            // Try multiple constraint strategies
+            // Important: do NOT await anything (like enumerateDevices) before getUserMedia.
             const constraints = [];
 
-            // Strategy 1: Optimal mobile constraints with flexible resolution ranges
-            // Works well on both iOS Safari and Android Chrome
             if (isMobile) {
-                console.log('Mobile device detected, using optimized mobile strategy');
-
                 constraints.push({
+                    audio: false,
                     video: {
-                        facingMode: { ideal: 'user' },
-                        width: { min: 640, ideal: 1280, max: 1920 },
-                        height: { min: 480, ideal: 720, max: 1080 },
-                        frameRate: { ideal: 30, max: 60 }
-                    }
-                });
-            }
-
-            // Strategy 2: Simple facingMode with ideal resolution (universal)
-            constraints.push({
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
-                }
-            });
-
-            // Strategy 3: Simple facingMode without resolution (maximum compatibility)
-            constraints.push({
-                video: {
-                    facingMode: 'user'
-                }
-            });
-
-            // Try to enumerate devices to find front camera
-            let frontCameraDeviceId = null;
-            let hasDeviceLabels = false;
-
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                console.log('Available video devices:', videoDevices.map(d => ({
-                    deviceId: d.deviceId,
-                    label: d.label || '(unlabeled)',
-                    kind: d.kind
-                })));
-
-                // Check if we have device labels (requires permission)
-                hasDeviceLabels = videoDevices.some(device => device.label !== '');
-                console.log('Device labels available:', hasDeviceLabels);
-
-                if (hasDeviceLabels) {
-                    // Look for front camera by label
-                    const frontCamera = videoDevices.find(device =>
-                        device.label.toLowerCase().includes('front') ||
-                        device.label.toLowerCase().includes('user') ||
-                        device.label.toLowerCase().includes('facetime')
-                    );
-
-                    if (frontCamera) {
-                        frontCameraDeviceId = frontCamera.deviceId;
-                        console.log('Found front camera by label:', frontCamera.label);
-                    } else if (videoDevices.length > 0) {
-                        // On mobile, first camera is usually front camera
-                        frontCameraDeviceId = videoDevices[0].deviceId;
-                        console.log('Using first camera as fallback:', videoDevices[0].label);
-                    }
-                }
-            } catch (enumError) {
-                console.warn('Could not enumerate devices:', enumError);
-            }
-
-            // Strategy 4: Use specific device ID if found (for desktop or as additional fallback)
-            if (frontCameraDeviceId && hasDeviceLabels && !isMobile) {
-                constraints.push({
-                    video: {
-                        deviceId: { exact: frontCameraDeviceId },
+                        facingMode: 'user',
                         width: { ideal: 1280 },
                         height: { ideal: 720 },
-                        frameRate: { ideal: 30 }
-                    }
+                        frameRate: { ideal: 30 },
+                    },
                 });
             }
 
-            // Strategy 5: Minimal constraints (last resort)
             constraints.push({
-                video: true
+                audio: false,
+                video: {
+                    facingMode: { ideal: 'user' },
+                },
             });
+
+            constraints.push({ audio: false, video: true });
 
             console.log(`Will try ${constraints.length} camera strategies`);
 
-            // Try each constraint strategy
             let stream = null;
             let lastError = null;
 
             for (let i = 0; i < constraints.length; i++) {
                 try {
                     console.log(`Trying camera constraint strategy ${i + 1}/${constraints.length}:`, constraints[i]);
-                    const testStream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+                    const testStream = await getUserMediaCompat(constraints[i]);
 
-                    // Verify we got the front camera
                     const videoTrack = testStream.getVideoTracks()[0];
                     if (videoTrack) {
                         const settings = videoTrack.getSettings();
@@ -164,22 +188,21 @@ const HandTracker = ({ onHandUpdate }) => {
                             width: settings.width,
                             height: settings.height,
                             frameRate: settings.frameRate,
-                            deviceId: settings.deviceId
+                            deviceId: settings.deviceId,
                         });
 
-                        // Check if this is the back camera (we want front camera)
-                        if (settings.facingMode === 'environment') {
-                            console.warn(`Strategy ${i + 1} returned back camera, trying next strategy...`);
-                            testStream.getTracks().forEach(track => track.stop());
-                            continue;
-                        }
+                        const requestedFacingMode = constraints[i]?.video?.facingMode;
+                        const requestedFacingModeValue =
+                            typeof requestedFacingMode === 'string' ? requestedFacingMode : requestedFacingMode?.ideal;
+                        const inferredFacingMode = settings.facingMode || requestedFacingModeValue;
+                        isFrontCameraRef.current = inferredFacingMode !== 'environment';
                     }
 
                     stream = testStream;
-                    console.log(`鉁?Successfully obtained front camera with strategy ${i + 1}`);
+                    console.log(`✓ Successfully obtained camera with strategy ${i + 1}`);
                     break;
                 } catch (err) {
-                    console.warn(`Strategy ${i + 1} failed:`, err.name, err.message);
+                    console.warn(`Strategy ${i + 1} failed:`, err?.name, err?.message);
                     lastError = err;
                 }
             }
@@ -188,64 +211,70 @@ const HandTracker = ({ onHandUpdate }) => {
                 throw lastError || new Error('All camera strategies failed');
             }
 
-            // Log final camera settings
-            const videoTrack = stream.getVideoTracks()[0];
-            if (videoTrack) {
-                const settings = videoTrack.getSettings();
-                console.log('鉁?Final camera settings:', {
-                    facingMode: settings.facingMode,
-                    width: settings.width,
-                    height: settings.height,
-                    frameRate: settings.frameRate,
-                    deviceId: settings.deviceId,
-                    label: videoTrack.label
-                });
-            }
-
+            streamRef.current = stream;
+            videoRef.current.lastVideoTime = -1;
             videoRef.current.srcObject = stream;
+            videoRef.current.setAttribute('playsinline', '');
+            videoRef.current.setAttribute('webkit-playsinline', '');
+            videoRef.current.muted = true;
+            videoRef.current.autoplay = true;
 
-            // Critical for iOS: Wait for video metadata to load before playing
             videoRef.current.onloadedmetadata = async () => {
                 try {
                     console.log('Video metadata loaded, attempting to play...');
                     await videoRef.current.play();
                     console.log('✓ Video playback started successfully');
                     setShowPlayButton(false);
-
-                    // Start hand tracking after video is playing
-                    predictWebcam();
+                    maybeStartPredicting();
                 } catch (playErr) {
                     console.error('Video playback failed:', playErr);
                     setShowPlayButton(true);
-                    // alert('无法播放摄像头画面。\n\niOS 用户请确保：\n1. 使用 Safari 浏览器\n2. 已授予摄像头权限\n3. 不在低电量模式\n\n错误: ' + playErr.message);
                 }
             };
+
+            // If metadata is already ready (some browsers), start immediately.
+            if (videoRef.current.readyState >= 1) {
+                void videoRef.current.onloadedmetadata();
+            }
+
+            // If model init already completed, start predicting once video has data.
+            void initPromiseRef.current;
         } catch (err) {
             console.error('Error accessing webcam:', {
-                name: err.name,
-                message: err.message,
-                constraint: err.constraint
+                name: err?.name,
+                message: err?.message,
+                constraint: err?.constraint,
             });
 
-            // Provide user-friendly error messages
             let errorMessage = '无法访问摄像头。';
-            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
                 errorMessage += '请允许浏览器访问摄像头权限。';
-            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+            } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
                 errorMessage += '未找到摄像头设备。';
-            } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+            } else if (err?.name === 'NotReadableError' || err?.name === 'TrackStartError') {
                 errorMessage += '摄像头正被其他应用使用。';
-            } else if (err.name === 'OverconstrainedError') {
+            } else if (err?.name === 'OverconstrainedError') {
                 errorMessage += '摄像头不支持请求的配置。';
             }
 
+            if (isIOSInAppBrowser) {
+                errorMessage += '\n\niOS 内置浏览器/小程序通常无法使用摄像头，请在 Safari 中打开。';
+            }
+
             console.error(errorMessage);
-            alert(errorMessage + '\n\n技术详情: ' + err.message);
+            alert(errorMessage + '\n\n技术详情: ' + (err?.message || String(err)));
         }
     };
 
     const predictWebcam = () => {
-        if (!handLandmarkerRef.current || !videoRef.current) return;
+        if (!startedRef.current) {
+            predictingRef.current = false;
+            return;
+        }
+        if (!handLandmarkerRef.current || !videoRef.current) {
+            predictingRef.current = false;
+            return;
+        }
 
         const startTimeMs = performance.now();
         if (videoRef.current.currentTime !== videoRef.current.lastVideoTime) {
@@ -258,7 +287,7 @@ const HandTracker = ({ onHandUpdate }) => {
                 const tips = [8, 12, 16, 20]; // Index, Middle, Ring, Pinky
 
                 let avgDist = 0;
-                tips.forEach(idx => {
+                tips.forEach((idx) => {
                     const dx = landmarks[idx].x - wrist.x;
                     const dy = landmarks[idx].y - wrist.y;
                     const dz = landmarks[idx].z - wrist.z;
@@ -269,16 +298,16 @@ const HandTracker = ({ onHandUpdate }) => {
                 const isClosed = avgDist < 0.25;
 
                 // Mirror X for front camera feel
-                const x = (0.5 - landmarks[9].x) * 10;
+                const x = (isFrontCameraRef.current ? 0.5 - landmarks[9].x : landmarks[9].x - 0.5) * 10;
                 const y = (0.5 - landmarks[9].y) * 10;
 
                 onHandUpdate({
                     isOpen: !isClosed,
                     position: [x, y, 0],
-                    isDetected: true
+                    isDetected: true,
                 });
             } else {
-                onHandUpdate(prev => ({ ...prev, isDetected: false }));
+                onHandUpdate((prev) => ({ ...prev, isDetected: false }));
             }
 
             videoRef.current.lastVideoTime = videoRef.current.currentTime;
@@ -287,17 +316,15 @@ const HandTracker = ({ onHandUpdate }) => {
         requestRef.current = requestAnimationFrame(predictWebcam);
     };
 
-
-
     const handleManualPlay = async () => {
         if (videoRef.current) {
             try {
                 await videoRef.current.play();
                 setShowPlayButton(false);
-                predictWebcam();
+                maybeStartPredicting();
             } catch (e) {
-                console.error("Manual play failed", e);
-                alert("无法启动视频: " + e.message);
+                console.error('Manual play failed', e);
+                alert('无法启动视频: ' + (e?.message || String(e)));
             }
         }
     };
@@ -308,7 +335,6 @@ const HandTracker = ({ onHandUpdate }) => {
                 ref={videoRef}
                 autoPlay
                 playsInline
-                webkit-playsinline="true"
                 muted
                 style={{
                     position: 'absolute',
@@ -318,17 +344,19 @@ const HandTracker = ({ onHandUpdate }) => {
                     height: '100%',
                     opacity: 0,
                     pointerEvents: 'none',
-                    zIndex: -1
+                    zIndex: -1,
                 }}
             />
             {showPlayButton && (
-                <div style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    zIndex: 1000
-                }}>
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 1000,
+                    }}
+                >
                     <button
                         onClick={handleManualPlay}
                         style={{
@@ -337,7 +365,7 @@ const HandTracker = ({ onHandUpdate }) => {
                             backgroundColor: 'rgba(255, 0, 0, 0.8)',
                             color: 'white',
                             border: 'none',
-                            borderRadius: '10px'
+                            borderRadius: '10px',
                         }}
                     >
                         点击启动摄像头
@@ -346,6 +374,6 @@ const HandTracker = ({ onHandUpdate }) => {
             )}
         </>
     );
-};
+});
 
 export default HandTracker;

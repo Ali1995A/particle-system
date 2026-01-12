@@ -14,6 +14,7 @@ function App() {
   const [particleColor, setParticleColor] = useState('#FF0000'); // Default Red
 
   const wasOpenRef = useRef(true);
+  const handTrackerRef = useRef(null);
 
   // Sequence mapping
   const getShapeFromIndex = (index) => {
@@ -56,11 +57,19 @@ function App() {
 
   return (
     <>
-      {!hasStarted && <StartScreen onStart={() => setHasStarted(true)} />}
+      <HandTracker ref={handTrackerRef} onHandUpdate={setHandState} />
+
+      {!hasStarted && (
+        <StartScreen
+          onStart={() => {
+            handTrackerRef.current?.start?.();
+            setHasStarted(true);
+          }}
+        />
+      )}
 
       {hasStarted && (
         <>
-          <HandTracker onHandUpdate={setHandState} />
           <Scene
             handState={handState}
             activeShape={activeShape}
